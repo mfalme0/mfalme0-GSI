@@ -1,4 +1,6 @@
-# FH Sensor Studio
+# mfalme0-gsi
+
+FH Sensor Studio is the desktop app in the `mfalme0-gsi` project.
 
 FH Sensor Studio is a Windows desktop app for streaming telemetry to an
 Arduino and reacting to game state with OpenRGB. It brings the supported game
@@ -10,7 +12,7 @@ keeps the active bridge state visible across pages.
 ## Download and quick start
 
 Download the latest **`FHSensorStudio.exe`** from
-[GitHub Releases](https://github.com/mfalme0/mfalme0-GSI/releases/latest).
+[GitHub Releases](https://github.com/mfalme0/mfalme0-gsi/releases/latest).
 The standalone Windows app does not require a Python installation. Open it,
 choose an integration from the sidebar, configure that game's connection, and
 click **Start bridge**. Use **Stop** before changing a running integration's
