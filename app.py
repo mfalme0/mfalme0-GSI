@@ -25,35 +25,67 @@ from cs2rgb import (
 from dota2 import health_color as dota_health_color
 from leagueoflegends import HTTPError, URLError, fetch_live_data, health_color as lol_health_color
 from lcdfh5 import parse_fh5_telemetry
+from pages.fh5_page import FH5TelemetryPage
 from rocketleague import color_for_event, decode_event, extract_json_messages
+from theme import (
+    COLOR_ACCENT as ACCENT,
+    COLOR_ACCENT_SOFT as ACCENT_SOFT,
+    COLOR_BACKGROUND as BG,
+    COLOR_BORDER as BORDER,
+    COLOR_ERROR as RED,
+    COLOR_FIELD as FIELD,
+    COLOR_PANEL as PANEL,
+    COLOR_PANEL_HOVER,
+    COLOR_PANEL_RAISED as PANEL_LIGHT,
+    COLOR_STATUS_BORDER_ACTIVE,
+    COLOR_SIDEBAR as SIDEBAR,
+    COLOR_SUCCESS as GREEN,
+    COLOR_TEXT as TEXT,
+    COLOR_TEXT_DIM,
+    COLOR_TEXT_LOG,
+    COLOR_TEXT_MUTED as MUTED,
+    COLOR_WARNING as ORANGE,
+    COLOR_ACCENT_BUTTON,
+    COLOR_ACCENT_BUTTON_TEXT,
+    COLOR_ACCENT_HOVER,
+    COLOR_BUTTON_HOVER,
+    COLOR_FIELD_HOVER,
+    COLOR_GAUGE_TRACK,
+    FONT_BODY as FONT,
+    FONT_DISPLAY,
+    FONT_MONO,
+    FONT_SIZE_BRAND,
+    FONT_SIZE_COLOR_DETAIL,
+    FONT_SIZE_COLOR_READOUT,
+    FONT_SIZE_ICON,
+    FONT_SIZE_MICRO,
+    FONT_SIZE_PAGE_TITLE,
+    FONT_SIZE_READOUT,
+    FONT_SIZE_SMALL,
+    FONT_SIZE_BODY,
+    RADIUS_BRAND_MARK,
+    RADIUS_CONTROL,
+    RADIUS_PANEL,
+    RADIUS_TILE,
+    WINDOW_HEIGHT,
+    WINDOW_MIN_HEIGHT,
+    WINDOW_MIN_WIDTH,
+    WINDOW_WIDTH,
+    apply_theme,
+)
+from ui_components import ColorSwatch, PersistentStatusStrip
 
 
 APP_NAME = "FH Sensor Studio"
-BG = "#080E19"
-SIDEBAR = "#0B1321"
-PANEL = "#101A2A"
-PANEL_LIGHT = "#172438"
-FIELD = "#0B1422"
-BORDER = "#1C2B40"
-TEXT = "#EFF5FA"
-MUTED = "#8799AC"
-ACCENT = "#52E0C0"
-ACCENT_SOFT = "#12332F"
-GREEN = "#52E0A0"
-RED = "#FF687D"
-ORANGE = "#FFC46B"
-FONT = "Segoe UI"
-FONT_DISPLAY = "Segoe UI Variable Display"
 
 
 class BridgeApp(ctk.CTk):
     def __init__(self):
-        ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("dark-blue")
+        apply_theme(ctk)
         super().__init__()
         self.title(APP_NAME)
-        self.geometry("1220x820")
-        self.minsize(1040, 720)
+        self.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
+        self.minsize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self.configure(fg_color=BG)
         icon_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
         icon_path = icon_dir / "assets" / "fhsensor.ico"
@@ -62,6 +94,8 @@ class BridgeApp(ctk.CTk):
 
         self.events = queue.Queue()
         self.workers = {}
+        self.bridge_states = {}
+        self.bridge_readouts = {}
         self.active_page = "fh5"
         self.settings = self._load_settings()
         self._build_ui()
@@ -70,6 +104,7 @@ class BridgeApp(ctk.CTk):
 
     def _load_settings(self):
         defaults = {
+            "fh5_host": "0.0.0.0",
             "fh5_serial": "COM9",
             "fh5_baud": "9600",
             "udp_port": "5300",
@@ -123,6 +158,7 @@ class BridgeApp(ctk.CTk):
 
     def _current_settings(self):
         return {
+            "fh5_host": self.fh5_host.get(),
             "fh5_serial": self.fh5_serial.get(),
             "fh5_baud": self.fh5_baud.get(),
             "udp_port": self.udp_port.get(),
@@ -158,16 +194,16 @@ class BridgeApp(ctk.CTk):
         sidebar.grid_propagate(False)
         brand = ctk.CTkFrame(sidebar, fg_color="transparent")
         brand.pack(fill="x", padx=20, pady=(24, 20))
-        mark = ctk.CTkFrame(brand, width=42, height=42, corner_radius=13, fg_color=ACCENT_SOFT)
+        mark = ctk.CTkFrame(brand, width=42, height=42, corner_radius=RADIUS_BRAND_MARK, fg_color=ACCENT_SOFT)
         mark.pack(side="left", padx=(0, 11))
         mark.pack_propagate(False)
-        ctk.CTkLabel(mark, text="F", font=(FONT_DISPLAY, 24, "bold"), text_color=ACCENT).pack(expand=True)
+        ctk.CTkLabel(mark, text="F", font=(FONT_DISPLAY, FONT_SIZE_ICON, "bold"), text_color=ACCENT).pack(expand=True)
         brand_text = ctk.CTkFrame(brand, fg_color="transparent")
         brand_text.pack(side="left", fill="x", expand=True)
-        ctk.CTkLabel(brand_text, text="FH SENSOR", font=(FONT_DISPLAY, 16, "bold"), text_color=TEXT).pack(
+        ctk.CTkLabel(brand_text, text="FH SENSOR", font=(FONT_DISPLAY, FONT_SIZE_BRAND, "bold"), text_color=TEXT).pack(
             anchor="w", pady=(2, 0)
         )
-        ctk.CTkLabel(brand_text, text="GAME SYNC STUDIO", font=(FONT, 9, "bold"), text_color=MUTED).pack(
+        ctk.CTkLabel(brand_text, text="GAME SYNC STUDIO", font=(FONT, FONT_SIZE_MICRO, "bold"), text_color=MUTED).pack(
             anchor="w", pady=(1, 0)
         )
         ctk.CTkFrame(sidebar, height=1, fg_color=BORDER).pack(fill="x", padx=20, pady=(0, 16))
@@ -176,7 +212,7 @@ class BridgeApp(ctk.CTk):
             sidebar,
             fg_color="transparent",
             corner_radius=0,
-            scrollbar_button_color="#26364A",
+            scrollbar_button_color=COLOR_GAUGE_TRACK,
             scrollbar_button_hover_color=ACCENT,
         )
         nav.pack(fill="both", expand=True, padx=(8, 4), pady=(0, 10))
@@ -188,12 +224,12 @@ class BridgeApp(ctk.CTk):
         self.nav_lol = self._nav_button(nav, "◈    LEAGUE OF LEGENDS", lambda: self._show_game("lol"))
         self.nav_rgb = self._nav_button(nav, "◈    OPENRGB STREAM", self._show_rgb)
         for text in ("RACING", "ARENA", "LIGHTING"):
-            ctk.CTkLabel(nav, text=text, font=(FONT, 9, "bold"), text_color="#60738B").pack(
+            ctk.CTkLabel(nav, text=text, font=(FONT, FONT_SIZE_MICRO, "bold"), text_color=COLOR_TEXT_DIM).pack(
                 anchor="w", padx=15, pady=(12, 5)
             )
             group = {
-                "RACING": (self.nav_fh5, self.nav_beamng, self.nav_rocket),
-                "ARENA": (self.nav_cs2, self.nav_dota, self.nav_lol),
+                "RACING": (self.nav_fh5, self.nav_beamng),
+                "ARENA": (self.nav_rocket, self.nav_cs2, self.nav_dota, self.nav_lol),
                 "LIGHTING": (self.nav_rgb,),
             }[text]
             for button in group:
@@ -205,18 +241,18 @@ class BridgeApp(ctk.CTk):
         ctk.CTkLabel(
             footer,
             text="LOCAL GAME DATA  ·  v1.0",
-            font=(FONT, 9, "bold"),
-            text_color="#60738B",
+            font=(FONT, FONT_SIZE_MICRO, "bold"),
+            text_color=COLOR_TEXT_DIM,
         ).pack(anchor="w")
         ctk.CTkLabel(
             footer,
             text="Telemetry stays on this PC",
-            font=(FONT, 10),
+            font=(FONT, FONT_SIZE_SMALL),
             text_color=MUTED,
         ).pack(anchor="w", pady=(5, 0))
 
         main = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
-        main.grid(row=0, column=1, sticky="nsew", padx=(30, 34), pady=(26, 28))
+        main.grid(row=0, column=1, sticky="nsew", padx=(22, 24), pady=(18, 16))
         main.grid_columnconfigure(0, weight=1)
         main.grid_rowconfigure(2, weight=1)
 
@@ -224,22 +260,22 @@ class BridgeApp(ctk.CTk):
         header.grid(row=0, column=0, sticky="ew", pady=(0, 23))
         header.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
-            header, text="YOUR WORKSPACE  /  GAME LIGHTING", font=(FONT, 9, "bold"), text_color=ACCENT
+            header, text="PIT WALL  /  LIVE GAME TELEMETRY", font=(FONT, FONT_SIZE_MICRO, "bold"), text_color=ACCENT
         ).grid(row=0, column=0, sticky="w", pady=(0, 5))
         self.heading = ctk.CTkLabel(
-            header, text="Forza Horizon 5 / 6", font=(FONT_DISPLAY, 29, "bold"), text_color=TEXT
+            header, text="Forza Horizon 5 / 6", font=(FONT_DISPLAY, FONT_SIZE_PAGE_TITLE, "bold"), text_color=TEXT
         )
         self.heading.grid(row=1, column=0, sticky="w")
         self.subtitle = ctk.CTkLabel(
-            header, text="Live game telemetry to your Arduino", font=(FONT, 12), text_color=MUTED
+            header, text="Live game telemetry to your Arduino", font=(FONT, FONT_SIZE_BODY), text_color=MUTED
         )
         self.subtitle.grid(row=2, column=0, sticky="w", pady=(4, 0))
         self.status_pill = ctk.CTkFrame(
-            header, fg_color=PANEL, corner_radius=12, border_width=1, border_color=BORDER
+            header, fg_color=PANEL, corner_radius=RADIUS_CONTROL, border_width=1, border_color=BORDER
         )
         self.status_pill.grid(row=1, column=1, rowspan=2, sticky="e", padx=(12, 0))
         self.header_status = ctk.CTkLabel(
-            self.status_pill, text="●  BRIDGE STOPPED", font=(FONT, 10, "bold"), text_color=MUTED
+            self.status_pill, text="●  BRIDGE STOPPED", font=(FONT, FONT_SIZE_SMALL, "bold"), text_color=MUTED
         )
         self.header_status.pack(padx=13, pady=9)
         ctk.CTkFrame(main, height=1, fg_color=BORDER).grid(row=1, column=0, sticky="ew", pady=(0, 20))
@@ -318,6 +354,8 @@ class BridgeApp(ctk.CTk):
         self.rocket_page.grid(row=0, column=0, sticky="nsew")
         self.dota_page.grid(row=0, column=0, sticky="nsew")
         self.lol_page.grid(row=0, column=0, sticky="nsew")
+        self.status_strip = PersistentStatusStrip(main)
+        self.status_strip.grid(row=3, column=0, sticky="ew", pady=(12, 0))
         self._show_fh5()
 
     def _nav_button(self, parent, text, command):
@@ -327,69 +365,34 @@ class BridgeApp(ctk.CTk):
             command=command,
             anchor="w",
             height=40,
-            corner_radius=9,
+            corner_radius=RADIUS_CONTROL,
             fg_color="transparent",
-            hover_color="#152337",
+            hover_color=COLOR_PANEL_HOVER,
             text_color=MUTED,
-            font=(FONT, 10, "bold"),
+            font=(FONT, FONT_SIZE_SMALL, "bold"),
         )
 
     def _build_fh5_page(self, parent):
-        page = ctk.CTkFrame(parent, fg_color="transparent")
-        page.grid_columnconfigure(0, weight=1)
-        page.grid_rowconfigure(1, weight=1)
-
-        settings_card = self._card(page)
-        settings_card.grid(row=0, column=0, sticky="ew", pady=(0, 16))
-        self._card_title(
-            settings_card, "CONNECTION SETTINGS", "Configure FH5 / FH6 UDP telemetry and the Arduino serial link"
+        self.fh5_reference_page = FH5TelemetryPage(
+            parent,
+            self.settings,
+            self._port_names,
+            lambda: self._start("fh5"),
+            lambda: self._stop("fh5"),
         )
-        fields = ctk.CTkFrame(settings_card, fg_color="transparent")
-        fields.pack(fill="x", padx=20, pady=(12, 18))
-        fields.grid_columnconfigure((0, 1, 2), weight=1)
-        self.fh5_serial = self._field(fields, "ARDUINO PORT", self.settings["fh5_serial"], 0, 0, combo=True)
-        self.fh5_baud = self._field(fields, "BAUD RATE", self.settings["fh5_baud"], 0, 1)
-        self.udp_port = self._field(fields, "TELEMETRY UDP PORT", self.settings["udp_port"], 0, 2)
-        self._refresh_ports_button(settings_card, 0)
-
-        content = ctk.CTkFrame(page, fg_color="transparent")
-        content.grid(row=1, column=0, sticky="nsew")
-        content.grid_columnconfigure(0, weight=3)
-        content.grid_columnconfigure(1, weight=2)
-        content.grid_rowconfigure(0, weight=1)
-        metrics = self._card(content)
-        metrics.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-        self._card_title(metrics, "LIVE TELEMETRY", "Values update when FH5 sends a valid Sled packet")
-        metric_grid = ctk.CTkFrame(metrics, fg_color="transparent")
-        metric_grid.pack(fill="both", expand=True, padx=18, pady=(12, 16))
-        metric_grid.grid_columnconfigure((0, 1, 2), weight=1)
-        self.speed_value = self._metric(metric_grid, "SPEED", "—", "km/h", 0)
-        self.rpm_value = self._metric(metric_grid, "ENGINE", "—", "RPM", 1)
-        self.gear_value = self._metric(metric_grid, "GEAR", "—", "GEAR", 2)
-        self.packet_value = ctk.CTkLabel(metrics, text="Packets received: 0", font=("Segoe UI", 11), text_color=MUTED)
-        self.packet_value.pack(anchor="w", padx=22, pady=(0, 18))
-
-        right = ctk.CTkFrame(content, fg_color="transparent")
-        right.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
-        right.grid_columnconfigure(0, weight=1)
-        right.grid_rowconfigure(1, weight=1)
-        control = self._card(right)
-        control.grid(row=0, column=0, sticky="ew", pady=(0, 14))
-        self._card_title(control, "BRIDGE CONTROL", "Start listening and stream values to the board")
-        self.fh5_state = ctk.CTkLabel(control, text="●  Stopped", text_color=MUTED, font=("Segoe UI", 12, "bold"))
-        self.fh5_state.pack(anchor="w", padx=20, pady=(14, 12))
-        actions = ctk.CTkFrame(control, fg_color="transparent")
-        actions.pack(fill="x", padx=18, pady=(0, 18))
-        self.fh5_start = self._action_button(actions, "Start bridge", lambda: self._start("fh5"), primary=True)
-        self.fh5_start.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        self.fh5_stop = self._action_button(actions, "Stop", lambda: self._stop("fh5"), state="disabled")
-        self.fh5_stop.pack(side="left", fill="x", expand=True, padx=(5, 0))
-
-        log_card = self._card(right)
-        log_card.grid(row=1, column=0, sticky="nsew")
-        self._card_title(log_card, "ACTIVITY", "Connection and runtime messages")
-        self.fh5_log = self._log(log_card)
-        return page
+        self.fh5_host = self.fh5_reference_page.fields["fh5_host"]
+        self.fh5_serial = self.fh5_reference_page.fields["fh5_serial"]
+        self.fh5_baud = self.fh5_reference_page.fields["fh5_baud"]
+        self.udp_port = self.fh5_reference_page.fields["udp_port"]
+        self.speed_value = self.fh5_reference_page.speed.value_label
+        self.rpm_value = self.fh5_reference_page.rpm_gauge
+        self.gear_value = self.fh5_reference_page.gear.value_label
+        self.packet_value = self.fh5_reference_page.packet_label
+        self.fh5_state = self.fh5_reference_page.controls.badge.label
+        self.fh5_start = self.fh5_reference_page.controls.start_button
+        self.fh5_stop = self.fh5_reference_page.controls.stop_button
+        self.fh5_log = self.fh5_reference_page.activity.textbox
+        return self.fh5_reference_page
 
     def _build_rgb_page(self, parent):
         page = ctk.CTkFrame(parent, fg_color="transparent")
@@ -418,15 +421,29 @@ class BridgeApp(ctk.CTk):
         self._card_title(preview, "LIVE COLOR", "Average RGB color from the first detected OpenRGB device")
         color_body = ctk.CTkFrame(preview, fg_color="transparent")
         color_body.pack(fill="both", expand=True, padx=20, pady=(8, 18))
-        color_body.grid_columnconfigure(0, weight=1)
+        color_body.grid_columnconfigure(0, weight=3)
+        color_body.grid_columnconfigure(1, weight=2)
         color_body.grid_rowconfigure(0, weight=1)
-        self.color_swatch = ctk.CTkFrame(color_body, width=180, height=140, corner_radius=18, fg_color="#263149")
-        self.color_swatch.grid(row=0, column=0, sticky="nsew", pady=(0, 14))
+        self.color_swatch = ColorSwatch(color_body, width=180, height=140)
+        self.color_swatch.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 12))
         self.color_swatch.grid_propagate(False)
-        self.color_value = ctk.CTkLabel(color_body, text="R  —     G  —     B  —", font=("Segoe UI", 18, "bold"), text_color=TEXT)
-        self.color_value.grid(row=1, column=0, pady=(0, 6))
-        self.device_value = ctk.CTkLabel(color_body, text="No device connected", font=("Segoe UI", 11), text_color=MUTED)
-        self.device_value.grid(row=2, column=0)
+        self.color_value = ctk.CTkLabel(
+            color_body,
+            text="R  —\nG  —\nB  —",
+            font=(FONT_MONO, FONT_SIZE_COLOR_READOUT, "bold"),
+            text_color=TEXT,
+            justify="left",
+        )
+        self.color_value.grid(row=0, column=1, sticky="sw", pady=(0, 6))
+        self.device_value = ctk.CTkLabel(
+            color_body,
+            text="No device connected",
+            font=(FONT, FONT_SIZE_SMALL),
+            text_color=MUTED,
+            wraplength=180,
+            justify="left",
+        )
+        self.device_value.grid(row=1, column=1, sticky="nw")
 
         right = ctk.CTkFrame(content, fg_color="transparent")
         right.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
@@ -435,7 +452,7 @@ class BridgeApp(ctk.CTk):
         control = self._card(right)
         control.grid(row=0, column=0, sticky="ew", pady=(0, 14))
         self._card_title(control, "BRIDGE CONTROL", "Stream average device color to the board")
-        self.rgb_state = ctk.CTkLabel(control, text="●  Stopped", text_color=MUTED, font=("Segoe UI", 12, "bold"))
+        self.rgb_state = ctk.CTkLabel(control, text="●  Stopped", text_color=MUTED, font=(FONT, FONT_SIZE_BODY, "bold"))
         self.rgb_state.pack(anchor="w", padx=20, pady=(14, 12))
         actions = ctk.CTkFrame(control, fg_color="transparent")
         actions.pack(fill="x", padx=18, pady=(0, 18))
@@ -478,7 +495,7 @@ class BridgeApp(ctk.CTk):
         ctk.CTkLabel(
             settings_card,
             text="Bind address is restricted to 127.0.0.1. The auth key is required and stays in memory only.",
-            font=("Segoe UI", 10),
+            font=(FONT, FONT_SIZE_MICRO),
             text_color=ORANGE,
         ).pack(anchor="w", padx=20, pady=(0, 15))
 
@@ -496,21 +513,20 @@ class BridgeApp(ctk.CTk):
         )
         color_body = ctk.CTkFrame(preview, fg_color="transparent")
         color_body.pack(fill="both", expand=True, padx=20, pady=(8, 18))
-        color_body.grid_columnconfigure(0, weight=1)
+        color_body.grid_columnconfigure(0, weight=3)
+        color_body.grid_columnconfigure(1, weight=2)
         color_body.grid_rowconfigure(0, weight=1)
-        self.cs2_color_swatch = ctk.CTkFrame(
-            color_body, width=180, height=140, corner_radius=18, fg_color="#263149"
-        )
-        self.cs2_color_swatch.grid(row=0, column=0, sticky="nsew", pady=(0, 14))
+        self.cs2_color_swatch = ColorSwatch(color_body, width=180, height=140)
+        self.cs2_color_swatch.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 12))
         self.cs2_color_swatch.grid_propagate(False)
         self.cs2_color_value = ctk.CTkLabel(
-            color_body, text="Waiting for CS2", font=("Segoe UI", 18, "bold"), text_color=TEXT
+            color_body, text="Waiting for CS2", font=(FONT_MONO, FONT_SIZE_COLOR_DETAIL, "bold"), text_color=TEXT
         )
-        self.cs2_color_value.grid(row=1, column=0, pady=(0, 6))
+        self.cs2_color_value.grid(row=0, column=1, sticky="sw", pady=(0, 6))
         self.cs2_event_value = ctk.CTkLabel(
-            color_body, text="No game state received", font=("Segoe UI", 11), text_color=MUTED
+            color_body, text="No game state received", font=(FONT, FONT_SIZE_SMALL), text_color=MUTED
         )
-        self.cs2_event_value.grid(row=2, column=0)
+        self.cs2_event_value.grid(row=1, column=1, sticky="nw")
 
         right = ctk.CTkFrame(content, fg_color="transparent")
         right.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
@@ -520,7 +536,7 @@ class BridgeApp(ctk.CTk):
         control.grid(row=0, column=0, sticky="ew", pady=(0, 14))
         self._card_title(control, "BRIDGE CONTROL", "Receive authenticated CS2 game events")
         self.cs2_state = ctk.CTkLabel(
-            control, text="●  Stopped", text_color=MUTED, font=("Segoe UI", 12, "bold")
+            control, text="●  Stopped", text_color=MUTED, font=(FONT, FONT_SIZE_BODY, "bold")
         )
         self.cs2_state.pack(anchor="w", padx=20, pady=(14, 12))
         actions = ctk.CTkFrame(control, fg_color="transparent")
@@ -586,19 +602,18 @@ class BridgeApp(ctk.CTk):
         else:
             color_body = ctk.CTkFrame(preview, fg_color="transparent")
             color_body.pack(fill="both", expand=True, padx=20, pady=(8, 18))
-            color_body.grid_columnconfigure(0, weight=1)
+            color_body.grid_columnconfigure(0, weight=3)
+            color_body.grid_columnconfigure(1, weight=2)
             color_body.grid_rowconfigure(0, weight=1)
-            ui["swatch"] = ctk.CTkFrame(
-                color_body, width=180, height=140, corner_radius=18, fg_color="#263149"
-            )
-            ui["swatch"].grid(row=0, column=0, sticky="nsew", pady=(0, 14))
+            ui["swatch"] = ColorSwatch(color_body, width=180, height=140)
+            ui["swatch"].grid(row=0, column=0, sticky="nsew", padx=(0, 12))
             ui["swatch"].grid_propagate(False)
             ui["value"] = ctk.CTkLabel(
-                color_body, text="Waiting for game", font=("Segoe UI", 18, "bold"), text_color=TEXT
+                color_body, text="Waiting for game", font=(FONT, FONT_SIZE_COLOR_READOUT, "bold"), text_color=TEXT
             )
-            ui["value"].grid(row=1, column=0, pady=(0, 6))
+            ui["value"].grid(row=0, column=1, sticky="sw", pady=(0, 6))
         ui["detail"] = ctk.CTkLabel(
-            preview, text="No game data received", font=("Segoe UI", 11), text_color=MUTED
+            preview, text="No game data received", font=(FONT, FONT_SIZE_SMALL), text_color=MUTED
         )
         ui["detail"].pack(anchor="w", padx=22, pady=(0, 16))
 
@@ -610,7 +625,7 @@ class BridgeApp(ctk.CTk):
         control.grid(row=0, column=0, sticky="ew", pady=(0, 14))
         self._card_title(control, "BRIDGE CONTROL", control_description)
         ui["state"] = ctk.CTkLabel(
-            control, text="●  Stopped", text_color=MUTED, font=("Segoe UI", 12, "bold")
+            control, text="●  Stopped", text_color=MUTED, font=(FONT, FONT_SIZE_BODY, "bold")
         )
         ui["state"].pack(anchor="w", padx=20, pady=(14, 12))
         actions = ctk.CTkFrame(control, fg_color="transparent")
@@ -631,7 +646,13 @@ class BridgeApp(ctk.CTk):
         return page
 
     def _card(self, parent):
-        return ctk.CTkFrame(parent, fg_color=PANEL, corner_radius=18, border_width=1, border_color=BORDER)
+        return ctk.CTkFrame(
+            parent,
+            fg_color=PANEL,
+            corner_radius=RADIUS_PANEL,
+            border_width=1,
+            border_color=BORDER,
+        )
 
     @staticmethod
     def _action_button(parent, text, command, primary=False, state="normal"):
@@ -640,53 +661,53 @@ class BridgeApp(ctk.CTk):
             text=text,
             command=command,
             height=42,
-            corner_radius=10,
-            fg_color="#39C8A6" if primary else PANEL_LIGHT,
-            hover_color="#52E0C0" if primary else "#22344B",
-            text_color="#071711" if primary else TEXT,
-            font=(FONT, 11, "bold"),
+            corner_radius=RADIUS_CONTROL,
+            fg_color=COLOR_ACCENT_BUTTON if primary else PANEL_LIGHT,
+            hover_color=ACCENT if primary else COLOR_BUTTON_HOVER,
+            text_color=COLOR_ACCENT_BUTTON_TEXT if primary else TEXT,
+            font=(FONT, FONT_SIZE_SMALL, "bold"),
             state=state,
         )
 
     def _card_title(self, parent, title, description):
-        ctk.CTkLabel(parent, text=title, font=(FONT, 10, "bold"), text_color=TEXT).pack(
+        ctk.CTkLabel(parent, text=title, font=(FONT, FONT_SIZE_SMALL, "bold"), text_color=TEXT).pack(
             anchor="w", padx=22, pady=(20, 0)
         )
-        ctk.CTkLabel(parent, text=description, font=(FONT, 10), text_color=MUTED).pack(
+        ctk.CTkLabel(parent, text=description, font=(FONT, FONT_SIZE_SMALL), text_color=MUTED).pack(
             anchor="w", padx=22, pady=(4, 0)
         )
 
     def _field(self, parent, label, value, row, column, combo=False, show=None):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.grid(row=row, column=column, sticky="ew", padx=(0, 10), pady=(0, 8))
-        ctk.CTkLabel(frame, text=label, font=(FONT, 9, "bold"), text_color=MUTED).pack(anchor="w", pady=(0, 6))
+        ctk.CTkLabel(frame, text=label, font=(FONT, FONT_SIZE_MICRO, "bold"), text_color=MUTED).pack(anchor="w", pady=(0, 6))
         if combo:
             ports = self._port_names()
             widget = ctk.CTkComboBox(
                 frame,
                 values=ports or [value],
                 height=38,
-                font=(FONT, 11),
+                font=(FONT, FONT_SIZE_SMALL),
                 fg_color=FIELD,
                 border_color=BORDER,
                 button_color=PANEL_LIGHT,
-                button_hover_color="#263B51",
+                button_hover_color=COLOR_FIELD_HOVER,
                 dropdown_fg_color=PANEL,
                 dropdown_hover_color=PANEL_LIGHT,
-                corner_radius=9,
+                corner_radius=RADIUS_CONTROL,
             )
             widget.set(value)
         else:
             widget = ctk.CTkEntry(
                 frame,
                 height=38,
-                font=(FONT, 11),
+                font=(FONT, FONT_SIZE_SMALL),
                 show=show or "",
                 fg_color=FIELD,
                 border_color=BORDER,
                 text_color=TEXT,
                 placeholder_text_color=MUTED,
-                corner_radius=9,
+                corner_radius=RADIUS_CONTROL,
             )
             widget.insert(0, value)
         widget.pack(fill="x")
@@ -695,7 +716,9 @@ class BridgeApp(ctk.CTk):
     def _refresh_ports_button(self, parent, row):
         button = ctk.CTkButton(
             parent, text="↻  Refresh ports", width=124, height=30, fg_color=ACCENT_SOFT,
-            hover_color="#1A4540", text_color=ACCENT, font=(FONT, 10, "bold"),
+            hover_color=COLOR_ACCENT_HOVER,
+            text_color=ACCENT,
+            font=(FONT, FONT_SIZE_MICRO, "bold"),
             command=self._refresh_ports,
         )
         button.pack(anchor="e", padx=20, pady=(0, 13))
@@ -717,17 +740,18 @@ class BridgeApp(ctk.CTk):
         ):
             current = widget.get()
             widget.configure(values=values if current in values else values + [current])
+        self.fh5_reference_page.refresh_ports()
         message = f"Detected {len(ports)} serial port(s)."
         for mode in ("fh5", "rgb", *self.game_ui):
             self._log_message(mode, message)
 
     def _metric(self, parent, title, value, unit, column):
-        box = ctk.CTkFrame(parent, fg_color=FIELD, corner_radius=14, border_width=1, border_color=BORDER)
+        box = ctk.CTkFrame(parent, fg_color=FIELD, corner_radius=RADIUS_TILE, border_width=1, border_color=BORDER)
         box.grid(row=0, column=column, sticky="nsew", padx=5, pady=3)
-        ctk.CTkLabel(box, text=title, font=(FONT, 9, "bold"), text_color=MUTED).pack(pady=(20, 10))
-        label = ctk.CTkLabel(box, text=value, font=(FONT_DISPLAY, 32, "bold"), text_color=ACCENT)
+        ctk.CTkLabel(box, text=title, font=(FONT, FONT_SIZE_MICRO, "bold"), text_color=MUTED).pack(pady=(20, 10))
+        label = ctk.CTkLabel(box, text=value, font=(FONT_DISPLAY, FONT_SIZE_READOUT, "bold"), text_color=ACCENT)
         label.pack()
-        ctk.CTkLabel(box, text=unit, font=(FONT, 9, "bold"), text_color=MUTED).pack(pady=(3, 19))
+        ctk.CTkLabel(box, text=unit, font=(FONT, FONT_SIZE_MICRO, "bold"), text_color=MUTED).pack(pady=(3, 19))
         return label
 
     def _log(self, parent):
@@ -735,12 +759,12 @@ class BridgeApp(ctk.CTk):
             parent,
             height=100,
             fg_color=FIELD,
-            text_color="#B9C7DC",
-            font=("Cascadia Code", 10),
-            corner_radius=12,
+            text_color=COLOR_TEXT_LOG,
+            font=(FONT_MONO, FONT_SIZE_SMALL),
+            corner_radius=RADIUS_CONTROL,
             border_width=1,
             border_color=BORDER,
-            scrollbar_button_color="#25364A",
+            scrollbar_button_color=COLOR_GAUGE_TRACK,
             scrollbar_button_hover_color=ACCENT,
         )
         widget.pack(fill="both", expand=True, padx=18, pady=(14, 18))
@@ -817,8 +841,9 @@ class BridgeApp(ctk.CTk):
         )
         self.status_pill.configure(
             fg_color=ACCENT_SOFT if running else PANEL,
-            border_color="#24554A" if running else BORDER,
+            border_color=COLOR_STATUS_BORDER_ACTIVE if running else BORDER,
         )
+        self._refresh_status_strip()
 
     def _start(self, mode):
         if mode in self.workers:
@@ -827,10 +852,13 @@ class BridgeApp(ctk.CTk):
         try:
             if mode == "fh5":
                 config = {
+                    "listen_host": settings["fh5_host"].strip(),
                     "serial_port": settings["fh5_serial"].strip(),
                     "baud": self._integer(settings["fh5_baud"], "Baud rate", 1, 4_000_000),
                     "udp_port": self._integer(settings["udp_port"], "UDP port", 1, 65535),
                 }
+                if not config["listen_host"]:
+                    raise ValueError("UDP listen address cannot be empty.")
             elif mode == "rgb":
                 config = {
                     "serial_port": settings["rgb_serial"].strip(),
@@ -925,6 +953,7 @@ class BridgeApp(ctk.CTk):
                     return
 
         self._save_settings()
+        self.bridge_readouts.pop(mode, None)
         stop_event = threading.Event()
         thread = threading.Thread(target=self._run_bridge, args=(mode, config, stop_event), daemon=True)
         self.workers[mode] = (thread, stop_event, config)
@@ -957,14 +986,15 @@ class BridgeApp(ctk.CTk):
         try:
             if mode in ("fh5", "beamng"):
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                sock.bind(("0.0.0.0", config["udp_port"]))
+                host = config.get("listen_host", "0.0.0.0")
+                sock.bind((host, config["udp_port"]))
                 sock.settimeout(0.5)
                 ser = serial.Serial(config["serial_port"], config["baud"], timeout=0.5)
                 self.events.put(
-                    ("log", mode, f"Listening on UDP :{config['udp_port']}; connected to {config['serial_port']}.")
+                    ("log", mode, f"Listening on {host}:{config['udp_port']}; connected to {config['serial_port']}.")
                 )
                 self.events.put(
-                    ("status", mode, "Waiting for FH5 telemetry…" if mode == "fh5" else "Waiting for OutGauge data…")
+                    ("status", mode, "Waiting for FH5 / FH6 telemetry…" if mode == "fh5" else "Waiting for OutGauge data…")
                 )
                 stop_event.wait(2)
                 count = 0
@@ -1187,12 +1217,8 @@ class BridgeApp(ctk.CTk):
                 if kind == "telemetry_data":
                     mode, data = event[1], event[2]
                     if mode == "fh5":
-                        speed_value, rpm_value, gear_value = self.speed_value, self.rpm_value, self.gear_value
-                        speed_value.configure(text=str(data["speed"]))
-                        rpm_value.configure(text=f'{data["rpm"]:,}')
-                        gear = data["gear"]
-                        gear_value.configure(text="R" if gear < 0 else ("N" if gear == 0 else str(gear)))
-                        self.packet_value.configure(text=f'Packets received: {data["packets"]:,}')
+                        self.fh5_reference_page.update(data)
+                        self.bridge_readouts[mode] = self.fh5_reference_page.last_readout
                         self._set_mode_state(mode, True, "Receiving telemetry")
                         continue
                     ui = self.game_ui[mode]
@@ -1201,25 +1227,33 @@ class BridgeApp(ctk.CTk):
                     gear = data["gear"]
                     ui["gear"].configure(text="R" if gear == 0 else ("N" if gear == 1 else str(gear - 1)))
                     ui["detail"].configure(text=f'Valid packets received: {data["packets"]:,}')
+                    self.bridge_readouts[mode] = (
+                        f'{data["speed"]} km/h  ·  {data["rpm"]:,} RPM  ·  GEAR {data["gear"]}'
+                    )
                     self._set_mode_state(mode, True, "Receiving OutGauge telemetry")
                 elif kind == "rgb_data":
                     data = event[1]
                     self.color_value.configure(text=f'R  {data["red"]:3d}     G  {data["green"]:3d}     B  {data["blue"]:3d}')
-                    self.color_swatch.configure(fg_color=f'#{data["red"]:02x}{data["green"]:02x}{data["blue"]:02x}')
+                    self.color_swatch.set_color(f'#{data["red"]:02x}{data["green"]:02x}{data["blue"]:02x}')
+                    self.bridge_readouts["rgb"] = (
+                        f'R {data["red"]}  ·  G {data["green"]}  ·  B {data["blue"]}'
+                    )
                     self._set_mode_state("rgb", True, "Streaming color")
                 elif kind == "cs2_data":
                     data = event[1]
                     self.cs2_color_value.configure(text=data["rgb"])
-                    self.cs2_color_swatch.configure(fg_color=data["hex"])
+                    self.cs2_color_swatch.set_color(data["hex"])
                     self.cs2_event_value.configure(text=data["event"])
+                    self.bridge_readouts["cs2"] = data["event"]
                     self._set_mode_state("cs2", True, "Receiving game state")
                 elif kind == "cs2_device":
                     self.cs2_event_value.configure(text=event[1])
                 elif kind == "game_color":
                     mode, color, label = event[1], event[2], event[3]
+                    self.bridge_readouts[mode] = label
                     ui = self.game_ui[mode]
-                    ui["swatch"].configure(
-                        fg_color=f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}"
+                    ui["swatch"].set_color(
+                        f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}"
                     )
                     ui["value"].configure(
                         text=f"R {color[0]}  G {color[1]}  B {color[2]}"
@@ -1240,7 +1274,8 @@ class BridgeApp(ctk.CTk):
                 elif kind == "stopped":
                     mode = event[1]
                     self.workers.pop(mode, None)
-                    self._set_mode_state(mode, False, "Stopped")
+                    failed = self.bridge_states.get(mode) == "Error"
+                    self._set_mode_state(mode, False, "Error" if failed else "Stopped")
                     self._set_header_status(self.active_page)
         except queue.Empty:
             pass
@@ -1256,13 +1291,29 @@ class BridgeApp(ctk.CTk):
         else:
             ui = self.game_ui[mode]
             label, start, stop = ui["state"], ui["start"], ui["stop"]
-        color = RED if "error" in text.casefold() else (GREEN if running else MUTED)
-        label.configure(text=f"●  {text}", text_color=color)
-        start.configure(state="disabled" if running else "normal")
-        stop.configure(state="normal" if running else "disabled")
+        is_error = "error" in text.casefold()
+        state = "Error" if is_error else "Running" if running else "Stopped"
+        self.bridge_states[mode] = state
+        if mode == "fh5":
+            self.fh5_reference_page.set_state("Starting" if text.startswith("Starting") else state)
+        else:
+            color = RED if is_error else (GREEN if running else MUTED)
+            label.configure(text=f"●  {text}", text_color=color)
+            start.configure(state="disabled" if running else "normal")
+            stop.configure(state="normal" if running else "disabled")
+        if state == "Running" and self.bridge_readouts.get(mode) in (
+            None,
+            "Starting…",
+            "Connecting…",
+        ):
+            self.bridge_readouts[mode] = text
         self._set_header_status(self.active_page)
+        self._refresh_status_strip()
 
     def _log_message(self, mode, message):
+        if mode == "fh5":
+            self.fh5_reference_page.append_log(message)
+            return
         widgets = {
             "fh5": self.fh5_log,
             "rgb": self.rgb_log,
@@ -1274,6 +1325,27 @@ class BridgeApp(ctk.CTk):
         widget.insert("end", f"{timestamp}  {message}\n")
         widget.see("end")
         widget.configure(state="disabled")
+
+    def _refresh_status_strip(self):
+        if not hasattr(self, "status_strip"):
+            return
+        active_mode = (
+            self.active_page
+            if self.active_page in self.workers
+            else next(iter(self.workers), self.active_page)
+        )
+        names = {
+            "fh5": "FH5 / FH6 TELEMETRY",
+            "beamng": "BEAMNG.DRIVE",
+            "rocket": "ROCKET LEAGUE",
+            "cs2": "COUNTER-STRIKE 2",
+            "dota": "DOTA 2",
+            "lol": "LEAGUE OF LEGENDS",
+            "rgb": "OPENRGB COLOR",
+        }
+        state = self.bridge_states.get(active_mode, "Stopped")
+        readout = self.bridge_readouts.get(active_mode, "No live data")
+        self.status_strip.set_bridge(names.get(active_mode, active_mode), state, readout)
 
     def _on_close(self):
         for _, stop_event, _ in self.workers.values():

@@ -23,6 +23,10 @@ send data to an Arduino require the Arduino to be connected and its firmware
 to accept the message format below. Game telemetry itself must be enabled and
 configured in each game.
 
+The desktop window opens at 1360 × 800 and can be resized down to 1280 × 720.
+The bottom status strip stays visible while switching integrations and shows
+the selected active bridge, its state, and most recent key readout.
+
 ## What's included
 
 - A refreshed charcoal-and-mint interface with grouped Racing, Arena, and
@@ -56,6 +60,19 @@ The bridges remain independent and use different serial formats:
 
 The Arduino firmware must understand the selected bridge's message format and
 baud rate. This project does not include Arduino firmware.
+
+## UI structure
+
+The visual theme is centralized in `theme.py` (palette, typography, spacing,
+radii, and window sizing). `ui_components.py` provides reusable `StatusBadge`,
+`SettingsCard`, `ReadoutTile`, `ColorSwatch`, `ActivityLog`,
+`BridgeControls`, `RpmGauge`, and persistent status-strip components.
+
+`pages/fh5_page.py` is the complete racing-page example used by the app. It
+owns its settings, speed/gear tiles, Canvas RPM gauge, bridge controls, and
+activity log. The bridge worker sends telemetry to its simple
+`FH5TelemetryPage.update(data)` method; use this separation as the pattern for
+building additional dedicated pages.
 
 ## Build the executable
 
@@ -98,7 +115,8 @@ directly through OpenRGB instead of the Arduino serial bridge.
 
 1. In FH5, enable telemetry UDP output and select the Sled packet format.
 2. Set its destination to the computer running the app and use the UDP port
-   shown on the FH5 Telemetry page (default `5300`).
+   shown on the FH5 Telemetry page (default `5300`). The app listens on
+   `0.0.0.0` by default; use `127.0.0.1` to restrict it to local traffic.
 3. Select the Arduino COM port and set the baud rate to match the firmware
    (default `COM9`, `9600`).
 4. Start the bridge. The app displays speed, RPM, gear, and received packet
