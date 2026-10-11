@@ -69,7 +69,7 @@ def get_color(gsi_data, last_known_states):
     return color, None
 
 
-def create_handler(secret_key, on_update):
+def create_handler(secret_key, on_update, token_field="key1"):
     class GSIHandler(BaseHTTPRequestHandler):
         def do_POST(self):
             try:
@@ -94,7 +94,7 @@ def create_handler(secret_key, on_update):
             if not isinstance(auth, dict):
                 self.send_error(403, "Unauthorized")
                 return
-            received_key = auth.get("key1", "")
+            received_key = auth.get(token_field, "")
             if not isinstance(received_key, str) or not hmac.compare_digest(received_key, secret_key):
                 self.send_error(403, "Unauthorized")
                 return
