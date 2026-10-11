@@ -7,6 +7,41 @@ settings, live readouts, status messages, and start/stop controls. Its
 racing-inspired charcoal-and-mint skin groups game sources by category and
 keeps the active bridge state visible across pages.
 
+## Download and quick start
+
+Download the latest **`FHSensorStudio.exe`** from
+[GitHub Releases](https://github.com/mfalme0/mfalme0-GSI/releases/latest).
+The standalone Windows app does not require a Python installation. Open it,
+choose an integration from the sidebar, configure that game's connection, and
+click **Start bridge**. Use **Stop** before changing a running integration's
+settings.
+
+The app remembers non-secret settings in
+`%APPDATA%\FHSensorStudio\settings.json`. Game integrations that use OpenRGB
+require OpenRGB to be running with its SDK server enabled; integrations that
+send data to an Arduino require the Arduino to be connected and its firmware
+to accept the message format below. Game telemetry itself must be enabled and
+configured in each game.
+
+## What's included
+
+- A refreshed charcoal-and-mint interface with grouped Racing, Arena, and
+  Lighting navigation, live connection status, telemetry readouts, and
+  activity logs.
+- FH5 and FH6 UDP telemetry using the shared Sled packet format.
+- BeamNG.drive OutGauge telemetry over UDP.
+- Rocket League local Stats API events over TCP.
+- CS2 and Dota 2 authenticated Game State Integration (GSI) listeners.
+- League of Legends local Live Client Data API polling.
+- OpenRGB-to-Arduino color streaming.
+- Automatic settings persistence, serial-port refresh, input validation, and
+  separate start/stop controls for each bridge.
+
+The CS2, Dota 2, and League of Legends bridges control OpenRGB devices
+directly. They cannot run alongside each other. Serial bridges may run at the
+same time if they use different COM ports. The project does not include
+Arduino firmware or the OpenRGB application.
+
 The bridges remain independent and use different serial formats:
 
 | Bridge | Input | Arduino serial message | Default baud |
@@ -22,24 +57,10 @@ The bridges remain independent and use different serial formats:
 The Arduino firmware must understand the selected bridge's message format and
 baud rate. This project does not include Arduino firmware.
 
-## Run the Windows app
-
-Download or build `FHSensorStudio.exe`, then double-click it. Select a bridge
-in the left sidebar, check its connection settings, and click **Start bridge**.
-Use **Stop** to end a bridge. Serial bridges can run concurrently when they
-use different COM ports. CS2, Dota 2, and League of Legends each control
-OpenRGB directly and are mutually exclusive; stop one before starting another.
-
-Settings are saved automatically to:
-
-```text
-%APPDATA%\FHSensorStudio\settings.json
-```
-
 ## Build the executable
 
-Requirements: Windows, Python 3.10 or later, and an internet connection for
-initial dependency installation.
+To build from source, use Windows and Python 3.10 or later. An internet
+connection is needed to install dependencies the first time.
 
 1. Open this project folder in File Explorer.
 2. Double-click `build.bat`.
@@ -57,6 +78,21 @@ The executable is built for Windows and does not include Arduino firmware or
 the OpenRGB application. Windows may display a security prompt for an
 unsigned, locally built executable. The app uses its custom mint-on-charcoal
 icon and matching in-app branding.
+
+## How to use each integration
+
+All integrations follow the same basic workflow: select the game or lighting
+source in the sidebar, set the connection values to match the game/device,
+start the bridge, and check its status/readouts. Stop the bridge before
+changing its settings. The pages show their default ports and connection
+values; the game-specific sections below explain the setup required outside
+the app.
+
+For Arduino output, check the selected COM port in Device Manager or use
+**Refresh ports** in the app. Match the app's baud rate to the firmware. FH5,
+FH6, and BeamNG send `speed_kmh,rpm,gear\n`; Rocket League and OpenRGB Color
+send `red,green,blue\n`. CS2, Dota 2, and League of Legends output lighting
+directly through OpenRGB instead of the Arduino serial bridge.
 
 ## Configure FH5 telemetry
 
