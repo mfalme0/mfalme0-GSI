@@ -1,9 +1,10 @@
 # FH Sensor Studio
 
 FH Sensor Studio is a Windows desktop app for sending Forza Horizon 5
-telemetry or OpenRGB lighting colors to an Arduino. It wraps the two original
-bridges in one dark-themed interface with editable connection settings, live
-readouts, status messages, and start/stop controls.
+telemetry or OpenRGB lighting colors to an Arduino, and for reacting to
+Counter-Strike 2 game events with OpenRGB. It brings the bridges together in
+one dark-themed interface with editable connection settings, live readouts,
+status messages, and start/stop controls.
 
 The bridges remain independent and use different serial formats:
 
@@ -11,6 +12,7 @@ The bridges remain independent and use different serial formats:
 | --- | --- | --- | --- |
 | FH5 Telemetry | Forza Horizon 5 Sled-format UDP packets | `speed_kmh,rpm,gear\n` | 9600 |
 | OpenRGB Color | Average color of the first OpenRGB device | `red,green,blue\n` | 115200 |
+| CS2 Game State | Counter-Strike 2 Game State Integration (GSI) events | None; controls OpenRGB devices directly | — |
 
 The Arduino firmware must understand the selected bridge's message format and
 baud rate. This project does not include Arduino firmware.
@@ -19,8 +21,10 @@ baud rate. This project does not include Arduino firmware.
 
 Download or build `FHSensorStudio.exe`, then double-click it. Select a bridge
 in the left sidebar, check its connection settings, and click **Start bridge**.
-Use **Stop** to end the stream. The app can run both bridges simultaneously
-when each uses a different serial port; a single COM port cannot be shared.
+Use **Stop** to end a bridge. FH5 and the OpenRGB serial streamer can run at
+the same time when they use different serial ports. The CS2 bridge controls
+OpenRGB directly, so it cannot run at the same time as the OpenRGB serial
+streamer.
 
 Settings are saved automatically to:
 
@@ -77,6 +81,48 @@ The bridge averages the red, green, and blue channels of all LEDs on the first
 device reported by OpenRGB. If OpenRGB has no devices when connected, connect
 the device and restart the bridge.
 
+## Configure Counter-Strike 2
+
+1. Run OpenRGB with its SDK server enabled.
+2. In the app's **CS2 Game State** page, choose the OpenRGB host and SDK port.
+   Set the GSI port (default `5000`) and enter an auth key. The key is masked
+   and is not saved to the settings file.
+3. Create a Game State Integration config file in CS2's `game\csgo\cfg`
+   directory, for example `gamestate_integration_fhsensor.cfg`:
+
+   ```text
+   "FHSensorStudio"
+   {
+       "uri" "http://127.0.0.1:5000/"
+       "timeout" "5.0"
+       "buffer" "0.1"
+       "throttle" "0.1"
+       "heartbeat" "30.0"
+       "auth"
+       {
+           "token" "REPLACE_WITH_THE_KEY_ENTERED_IN_THE_APP"
+       }
+       "data"
+       {
+           "player_state" "1"
+           "player_match_stats" "1"
+           "map" "1"
+           "round" "1"
+       }
+   }
+   ```
+
+4. Replace the placeholder token with the same key entered in the app. Start
+   the CS2 bridge, then launch or restart CS2.
+
+The listener binds only to `127.0.0.1` and checks the GSI auth token before
+processing events. It changes all connected OpenRGB devices according to
+player health, menu/round state, kills, bomb events, and flash, fire, or smoke
+effects. Do not publish a real auth key in a config file, source file, issue, or
+commit. The app does not store the key; enter it again each time you start the
+CS2 bridge. The standalone `cs2rgb.py` script accepts the key through the
+`CS2_GSI_SECRET` environment variable or prompts for it.
+
 ## Troubleshooting
 
 - **Arduino connection error:** Select the correct COM port, close any other
@@ -88,8 +134,14 @@ the device and restart the bridge.
   verify the host and SDK port.
 - **No OpenRGB device/color:** Ensure OpenRGB detects a device before starting
   the bridge.
+- **CS2 reports no game state:** Confirm the GSI config file is in CS2's
+  `game\csgo\cfg` directory, its URI port matches the app, the token matches,
+  and CS2 has been restarted after creating the config.
+- **CS2/OpenRGB colors do not change:** Ensure OpenRGB is running and stop the
+  OpenRGB serial-color bridge before starting CS2 lighting.
 - **Build fails:** Confirm Python is on PATH and retry `build.bat`; the script
   installs the packages listed in `requirements.txt`.
 
-`lcdfh5.py` and `pyrgb.py` are retained as the original command-line scripts.
-The desktop app reuses the FH5 packet parser from `lcdfh5.py`.
+`lcdfh5.py`, `pyrgb.py`, and `cs2rgb.py` are also available as standalone
+scripts. The desktop app reuses the FH5 packet parser and CS2 game-state
+handling from those modules.

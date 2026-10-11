@@ -3,12 +3,21 @@ import queue
 import socket
 import threading
 import time
+from http.server import HTTPServer
 from tkinter import messagebox
 
 import customtkinter as ctk
 import serial
 from serial.tools import list_ports
 
+from cs2rgb import (
+    DEFAULT_GSI_HOST,
+    DEFAULT_GSI_PORT,
+    DEFAULT_OPENRGB_HOST,
+    DEFAULT_OPENRGB_PORT,
+    OpenRGBGameController,
+    create_handler,
+)
 from lcdfh5 import parse_fh5_telemetry
 
 
@@ -52,6 +61,9 @@ class BridgeApp(ctk.CTk):
             "openrgb_host": "localhost",
             "openrgb_port": "6745",
             "rgb_interval": "0.1",
+            "cs2_gsi_port": str(DEFAULT_GSI_PORT),
+            "cs2_openrgb_host": DEFAULT_OPENRGB_HOST,
+            "cs2_openrgb_port": str(DEFAULT_OPENRGB_PORT),
         }
         try:
             from pathlib import Path
@@ -89,6 +101,9 @@ class BridgeApp(ctk.CTk):
             "openrgb_host": self.openrgb_host.get(),
             "openrgb_port": self.openrgb_port.get(),
             "rgb_interval": self.rgb_interval.get(),
+            "cs2_gsi_port": self.cs2_gsi_port.get(),
+            "cs2_openrgb_host": self.cs2_openrgb_host.get(),
+            "cs2_openrgb_port": self.cs2_openrgb_port.get(),
         }
 
     def _build_ui(self):
@@ -113,11 +128,13 @@ class BridgeApp(ctk.CTk):
         )
         self.nav_fh5 = self._nav_button(sidebar, "  ◉  FH5 TELEMETRY", self._show_fh5)
         self.nav_rgb = self._nav_button(sidebar, "  ◉  OPENRGB COLOR", self._show_rgb)
+        self.nav_cs2 = self._nav_button(sidebar, "  ◉  CS2 GAME STATE", self._show_cs2)
         self.nav_fh5.pack(fill="x", padx=14, pady=4)
         self.nav_rgb.pack(fill="x", padx=14, pady=4)
+        self.nav_cs2.pack(fill="x", padx=14, pady=4)
         ctk.CTkLabel(
             sidebar,
-            text="Each bridge sends its own\nserial message format.\n\nUse separate COM ports\nwhen running both.",
+            text="FH5 and OpenRGB use serial.\nCS2 controls OpenRGB directly.\n\nRGB streaming and CS2 lighting\nshould not run together.",
             font=("Segoe UI", 11),
             text_color=MUTED,
             justify="left",
@@ -148,8 +165,10 @@ class BridgeApp(ctk.CTk):
         self.pages.grid_rowconfigure(0, weight=1)
         self.fh5_page = self._build_fh5_page(self.pages)
         self.rgb_page = self._build_rgb_page(self.pages)
+        self.cs2_page = self._build_cs2_page(self.pages)
         self.fh5_page.grid(row=0, column=0, sticky="nsew")
         self.rgb_page.grid(row=0, column=0, sticky="nsew")
+        self.cs2_page.grid(row=0, column=0, sticky="nsew")
         self._show_fh5()
 
     def _nav_button(self, parent, text, command):
@@ -279,6 +298,97 @@ class BridgeApp(ctk.CTk):
         self.rgb_log = self._log(log_card)
         return page
 
+    def _build_cs2_page(self, parent):
+        page = ctk.CTkFrame(parent, fg_color="transparent")
+        page.grid_columnconfigure(0, weight=1)
+        page.grid_rowconfigure(1, weight=1)
+        settings_card = self._card(page)
+        settings_card.grid(row=0, column=0, sticky="ew", pady=(0, 16))
+        self._card_title(
+            settings_card,
+            "CS2 GAME STATE INTEGRATION",
+            "Local-only GSI listener and OpenRGB connection",
+        )
+        fields = ctk.CTkFrame(settings_card, fg_color="transparent")
+        fields.pack(fill="x", padx=20, pady=(12, 8))
+        fields.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        self.cs2_gsi_port = self._field(
+            fields, "GSI HTTP PORT", self.settings["cs2_gsi_port"], 0, 0
+        )
+        self.cs2_openrgb_host = self._field(
+            fields, "OPENRGB HOST", self.settings["cs2_openrgb_host"], 0, 1
+        )
+        self.cs2_openrgb_port = self._field(
+            fields, "OPENRGB SDK PORT", self.settings["cs2_openrgb_port"], 0, 2
+        )
+        self.cs2_secret = self._field(
+            fields, "GSI AUTH KEY (NOT SAVED)", "", 0, 3, show="*"
+        )
+        ctk.CTkLabel(
+            settings_card,
+            text="Bind address is restricted to 127.0.0.1. The auth key is required and stays in memory only.",
+            font=("Segoe UI", 10),
+            text_color=ORANGE,
+        ).pack(anchor="w", padx=20, pady=(0, 15))
+
+        content = ctk.CTkFrame(page, fg_color="transparent")
+        content.grid(row=1, column=0, sticky="nsew")
+        content.grid_columnconfigure(0, weight=3)
+        content.grid_columnconfigure(1, weight=2)
+        content.grid_rowconfigure(0, weight=1)
+        preview = self._card(content)
+        preview.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        self._card_title(
+            preview,
+            "CS2 LIGHTING",
+            "Health, round events, bomb state, kills, and flash effects",
+        )
+        color_body = ctk.CTkFrame(preview, fg_color="transparent")
+        color_body.pack(fill="both", expand=True, padx=20, pady=(8, 18))
+        color_body.grid_columnconfigure(0, weight=1)
+        color_body.grid_rowconfigure(0, weight=1)
+        self.cs2_color_swatch = ctk.CTkFrame(
+            color_body, width=180, height=140, corner_radius=18, fg_color="#263149"
+        )
+        self.cs2_color_swatch.grid(row=0, column=0, sticky="nsew", pady=(0, 14))
+        self.cs2_color_swatch.grid_propagate(False)
+        self.cs2_color_value = ctk.CTkLabel(
+            color_body, text="Waiting for CS2", font=("Segoe UI", 18, "bold"), text_color=TEXT
+        )
+        self.cs2_color_value.grid(row=1, column=0, pady=(0, 6))
+        self.cs2_event_value = ctk.CTkLabel(
+            color_body, text="No game state received", font=("Segoe UI", 11), text_color=MUTED
+        )
+        self.cs2_event_value.grid(row=2, column=0)
+
+        right = ctk.CTkFrame(content, fg_color="transparent")
+        right.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(1, weight=1)
+        control = self._card(right)
+        control.grid(row=0, column=0, sticky="ew", pady=(0, 14))
+        self._card_title(control, "BRIDGE CONTROL", "Receive authenticated CS2 game events")
+        self.cs2_state = ctk.CTkLabel(
+            control, text="●  Stopped", text_color=MUTED, font=("Segoe UI", 12, "bold")
+        )
+        self.cs2_state.pack(anchor="w", padx=20, pady=(14, 12))
+        actions = ctk.CTkFrame(control, fg_color="transparent")
+        actions.pack(fill="x", padx=18, pady=(0, 18))
+        self.cs2_start = ctk.CTkButton(
+            actions, text="Start bridge", height=40, fg_color=ACCENT, command=lambda: self._start("cs2")
+        )
+        self.cs2_start.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.cs2_stop = ctk.CTkButton(
+            actions, text="Stop", height=40, fg_color="#29354C",
+            command=lambda: self._stop("cs2"), state="disabled"
+        )
+        self.cs2_stop.pack(side="left", fill="x", expand=True, padx=(5, 0))
+        log_card = self._card(right)
+        log_card.grid(row=1, column=0, sticky="nsew")
+        self._card_title(log_card, "ACTIVITY", "GSI and OpenRGB connection status")
+        self.cs2_log = self._log(log_card)
+        return page
+
     def _card(self, parent):
         return ctk.CTkFrame(parent, fg_color=PANEL, corner_radius=16, border_width=1, border_color="#1D2940")
 
@@ -290,7 +400,7 @@ class BridgeApp(ctk.CTk):
             anchor="w", padx=20, pady=(3, 0)
         )
 
-    def _field(self, parent, label, value, row, column, combo=False):
+    def _field(self, parent, label, value, row, column, combo=False, show=None):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.grid(row=row, column=column, sticky="ew", padx=(0, 12), pady=(0, 9))
         ctk.CTkLabel(frame, text=label, font=("Segoe UI", 9, "bold"), text_color=MUTED).pack(anchor="w", pady=(0, 5))
@@ -299,7 +409,7 @@ class BridgeApp(ctk.CTk):
             widget = ctk.CTkComboBox(frame, values=ports or [value], height=36, font=("Segoe UI", 11))
             widget.set(value)
         else:
-            widget = ctk.CTkEntry(frame, height=36, font=("Segoe UI", 11))
+            widget = ctk.CTkEntry(frame, height=36, font=("Segoe UI", 11), show=show or "")
             widget.insert(0, value)
         widget.pack(fill="x")
         return widget
@@ -349,6 +459,7 @@ class BridgeApp(ctk.CTk):
         self.subtitle.configure(text="Live game telemetry to your Arduino")
         self.nav_fh5.configure(fg_color=PANEL_LIGHT, text_color=TEXT)
         self.nav_rgb.configure(fg_color="transparent", text_color=MUTED)
+        self.nav_cs2.configure(fg_color="transparent", text_color=MUTED)
         self._set_header_status("fh5")
 
     def _show_rgb(self):
@@ -358,7 +469,18 @@ class BridgeApp(ctk.CTk):
         self.subtitle.configure(text="Share your lighting setup with an Arduino")
         self.nav_rgb.configure(fg_color=PANEL_LIGHT, text_color=TEXT)
         self.nav_fh5.configure(fg_color="transparent", text_color=MUTED)
+        self.nav_cs2.configure(fg_color="transparent", text_color=MUTED)
         self._set_header_status("rgb")
+
+    def _show_cs2(self):
+        self.active_page = "cs2"
+        self.cs2_page.tkraise()
+        self.heading.configure(text="Counter-Strike 2")
+        self.subtitle.configure(text="React to CS2 game state with OpenRGB")
+        self.nav_cs2.configure(fg_color=PANEL_LIGHT, text_color=TEXT)
+        self.nav_fh5.configure(fg_color="transparent", text_color=MUTED)
+        self.nav_rgb.configure(fg_color="transparent", text_color=MUTED)
+        self._set_header_status("cs2")
 
     def _set_header_status(self, mode):
         running = mode in self.workers
@@ -378,7 +500,7 @@ class BridgeApp(ctk.CTk):
                     "baud": self._integer(settings["fh5_baud"], "Baud rate", 1, 4_000_000),
                     "udp_port": self._integer(settings["udp_port"], "UDP port", 1, 65535),
                 }
-            else:
+            elif mode == "rgb":
                 config = {
                     "serial_port": settings["rgb_serial"].strip(),
                     "baud": self._integer(settings["rgb_baud"], "Baud rate", 1, 4_000_000),
@@ -390,14 +512,40 @@ class BridgeApp(ctk.CTk):
                     raise ValueError("Update interval must be between 0.02 and 10 seconds.")
                 if not config["host"]:
                     raise ValueError("OpenRGB host cannot be empty.")
-            if not config["serial_port"] or config["serial_port"] == "No ports found":
+            else:
+                config = {
+                    "gsi_port": self._integer(
+                        settings["cs2_gsi_port"], "CS2 GSI port", 1, 65535
+                    ),
+                    "openrgb_host": settings["cs2_openrgb_host"].strip(),
+                    "openrgb_port": self._integer(
+                        settings["cs2_openrgb_port"], "OpenRGB SDK port", 1, 65535
+                    ),
+                    "secret_key": self.cs2_secret.get(),
+                }
+                if not config["openrgb_host"]:
+                    raise ValueError("OpenRGB host cannot be empty.")
+                if not config["secret_key"] or len(config["secret_key"]) > 128:
+                    raise ValueError("Enter a CS2 GSI auth key (1–128 characters).")
+            if mode != "cs2" and (
+                not config["serial_port"] or config["serial_port"] == "No ports found"
+            ):
                 raise ValueError("Select or enter an Arduino serial port.")
         except ValueError as exc:
             messagebox.showerror("Check your settings", str(exc))
             return
 
-        other_mode = "rgb" if mode == "fh5" else "fh5"
-        if other_mode in self.workers:
+        if (mode == "cs2" and "rgb" in self.workers) or (
+            mode == "rgb" and "cs2" in self.workers
+        ):
+            messagebox.showerror(
+                "OpenRGB already in use",
+                "Stop the OpenRGB color streamer before starting CS2 lighting, or stop CS2 lighting before starting the streamer.",
+            )
+            return
+
+        other_mode = "rgb" if mode == "fh5" else "fh5" if mode == "rgb" else None
+        if other_mode and other_mode in self.workers:
             other_port = self.workers[other_mode][2]["serial_port"]
             if other_port.casefold() == config["serial_port"].casefold():
                 messagebox.showerror(
@@ -459,7 +607,7 @@ class BridgeApp(ctk.CTk):
                     if now - last_update >= 0.1:
                         self.events.put(("fh5_data", {"speed": speed, "rpm": rpm, "gear": gear, "packets": count}))
                         last_update = now
-            else:
+            elif mode == "rgb":
                 from openrgb import OpenRGBClient
 
                 ser = serial.Serial(config["serial_port"], config["baud"], timeout=1)
@@ -490,10 +638,64 @@ class BridgeApp(ctk.CTk):
                         ser.write(f"{red},{green},{blue}\n".encode("ascii"))
                         self.events.put(("rgb_data", {"red": red, "green": green, "blue": blue}))
                     stop_event.wait(config["interval"])
+            else:
+                from openrgb import OpenRGBClient
+
+                client = OpenRGBClient(
+                    address=config["openrgb_host"],
+                    port=config["openrgb_port"],
+                    name="FHSensorStudio CS2",
+                )
+                controller = OpenRGBGameController(client)
+                devices = controller.devices
+                summary = ", ".join(f"{device.name} ({len(device.colors)} LEDs)" for device in devices)
+                self.events.put(("log", mode, f"Connected to OpenRGB; found {len(devices)} device(s)."))
+                if summary:
+                    self.events.put(("cs2_device", summary))
+
+                def on_update(gsi_data):
+                    color, _ = controller.update(gsi_data)
+                    player = gsi_data.get("player", {})
+                    state = player.get("state", {})
+                    round_data = gsi_data.get("round", {})
+                    event_parts = []
+                    if "health" in state:
+                        event_parts.append(f'HP {state["health"]}')
+                    if round_data.get("bomb"):
+                        event_parts.append(f'Bomb {round_data["bomb"]}')
+                    self.events.put(
+                        (
+                            "cs2_data",
+                            {
+                                "hex": f"#{color.red:02x}{color.green:02x}{color.blue:02x}",
+                                "rgb": f"R {color.red}  G {color.green}  B {color.blue}",
+                                "event": "  ·  ".join(event_parts) or player.get("activity", "Game state received"),
+                            },
+                        )
+                    )
+
+                server = HTTPServer(
+                    (DEFAULT_GSI_HOST, config["gsi_port"]),
+                    create_handler(config["secret_key"], on_update),
+                )
+                server.timeout = 0.5
+                self.events.put(
+                    ("log", mode, f"CS2 GSI listening on {DEFAULT_GSI_HOST}:{config['gsi_port']}.")
+                )
+                self.events.put(("status", mode, "Waiting for CS2 game state…"))
+                while not stop_event.is_set():
+                    server.handle_request()
         except Exception as exc:
             if not stop_event.is_set():
                 self.events.put(("error", mode, str(exc)))
         finally:
+            if mode == "cs2" and "controller" in locals():
+                try:
+                    controller.close()
+                except Exception as exc:
+                    self.events.put(("log", mode, f"OpenRGB cleanup warning: {exc}"))
+            if mode == "cs2" and "server" in locals():
+                server.server_close()
             resources = []
             if sock is not None:
                 resources.append(("UDP socket", sock.close))
@@ -526,6 +728,14 @@ class BridgeApp(ctk.CTk):
                     self.color_value.configure(text=f'R  {data["red"]:3d}     G  {data["green"]:3d}     B  {data["blue"]:3d}')
                     self.color_swatch.configure(fg_color=f'#{data["red"]:02x}{data["green"]:02x}{data["blue"]:02x}')
                     self._set_mode_state("rgb", True, "Streaming color")
+                elif kind == "cs2_data":
+                    data = event[1]
+                    self.cs2_color_value.configure(text=data["rgb"])
+                    self.cs2_color_swatch.configure(fg_color=data["hex"])
+                    self.cs2_event_value.configure(text=data["event"])
+                    self._set_mode_state("cs2", True, "Receiving game state")
+                elif kind == "cs2_device":
+                    self.cs2_event_value.configure(text=event[1])
                 elif kind == "rgb_device":
                     self.device_value.configure(text=event[1])
                 elif kind == "status":
@@ -549,8 +759,10 @@ class BridgeApp(ctk.CTk):
     def _set_mode_state(self, mode, running, text):
         if mode == "fh5":
             label, start, stop = self.fh5_state, self.fh5_start, self.fh5_stop
-        else:
+        elif mode == "rgb":
             label, start, stop = self.rgb_state, self.rgb_start, self.rgb_stop
+        else:
+            label, start, stop = self.cs2_state, self.cs2_start, self.cs2_stop
         color = RED if "error" in text.casefold() else (GREEN if running else MUTED)
         label.configure(text=f"●  {text}", text_color=color)
         start.configure(state="disabled" if running else "normal")
@@ -558,7 +770,7 @@ class BridgeApp(ctk.CTk):
         self._set_header_status(self.active_page)
 
     def _log_message(self, mode, message):
-        widget = self.fh5_log if mode == "fh5" else self.rgb_log
+        widget = {"fh5": self.fh5_log, "rgb": self.rgb_log, "cs2": self.cs2_log}[mode]
         timestamp = time.strftime("%H:%M:%S")
         widget.configure(state="normal")
         widget.insert("end", f"{timestamp}  {message}\n")
